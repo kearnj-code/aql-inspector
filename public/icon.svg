@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background: dark wood -->
+  <rect width="512" height="512" rx="80" fill="#2a1508"/>
+
+  <!-- Brass border ring -->
+  <rect x="14" y="14" width="484" height="484" rx="70" fill="none" stroke="#c9a227" stroke-width="12"/>
+
+  <!-- Rule face (cream strip) -->
+  <rect x="48" y="160" width="416" height="192" rx="8" fill="#f4edcf"/>
+
+  <!-- Scale ticks on rule face -->
+  <line x1="96"  y1="160" x2="96"  y2="185" stroke="#5a3c1e" stroke-width="4"/>
+  <line x1="144" y1="160" x2="144" y2="185" stroke="#5a3c1e" stroke-width="4"/>
+  <line x1="192" y1="160" x2="192" y2="185" stroke="#5a3c1e" stroke-width="4"/>
+  <line x1="240" y1="160" x2="240" y2="185" stroke="#5a3c1e" stroke-width="4"/>
+  <line x1="288" y1="160" x2="288" y2="185" stroke="#5a3c1e" stroke-width="4"/>
+  <line x1="336" y1="160" x2="336" y2="185" stroke="#5a3c1e" stroke-width="4"/>
+  <line x1="384" y1="160" x2="384" y2="185" stroke="#5a3c1e" stroke-width="4"/>
+
+  <!-- Red cursor hairline -->
+  <line x1="220" y1="155" x2="220" y2="357" stroke="#cc1111" stroke-width="5" opacity="0.9"/>
+  <!-- Cursor flag -->
+  <polygon points="220,148 210,162 230,162" fill="#cc1111"/>
+
+  <!-- Brass divider strip -->
+  <rect x="48" y="268" width="416" height="14" fill="#c9a227"/>
+
+  <!-- AQL text on face -->
+  <text x="256" y="325" text-anchor="middle" font-family="'Courier New', monospace" font-size="56" font-weight="700" fill="#1a3060" letter-spacing="6">AQL</text>
+
+  <!-- Small rivet dots -->
+  <circle cx="52"  cy="52"  r="10" fill="#c9a227"/>
+  <circle cx="460" cy="52"  r="10" fill="#c9a227"/>
+  <circle cx="52"  cy="460" r="10" fill="#c9a227"/>
+  <circle cx="460" cy="460" r="10" fill="#c9a227"/>
+</svg>

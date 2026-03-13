@@ -1,304 +1,352 @@
-import { useState, useMemo } from 'react'
+import { useState, useRef, useCallback, useMemo } from 'react'
 import {
-  AQL_LEVELS,
-  INSPECTION_LEVEL_INDEX,
+  LOT_SIZE_RANGES,
   getCodeLetter,
   getSamplingPlan,
   getAllAqlResults,
-  LOT_SIZE_RANGES,
 } from './aqlData'
 
-const INSPECTION_LEVELS = Object.keys(INSPECTION_LEVEL_INDEX)
-const INSPECTION_TYPES = ['Normal', 'Tightened', 'Reduced']
+const COMMON_AQL   = [0.065, 0.10, 0.25, 0.40, 0.65, 1.0, 1.5, 2.5, 4.0, 6.5, 10]
+const INSP_LEVELS  = ['I', 'II', 'III', 'S-1', 'S-2', 'S-3', 'S-4']
+const INSP_TYPES   = ['Normal', 'Tightened', 'Reduced']
+const RANGE_COUNT  = LOT_SIZE_RANGES.length // 15
 
-const COMMON_AQL_LEVELS = [0.065, 0.10, 0.15, 0.25, 0.40, 0.65, 1.0, 1.5, 2.5, 4.0, 6.5, 10]
-
-function formatAql(v) {
-  if (v < 1) return v.toString()
-  return v.toString()
+function getRangeMidpoint(range) {
+  if (range.max === Infinity) return range.min * 3
+  return Math.round((range.min + range.max) / 2)
 }
 
-function AqlBadge({ ac, re }) {
-  if (ac === undefined || re === undefined) return <span className="badge badge-na">N/A</span>
-  return (
-    <span className="badge-pair">
-      <span className="badge badge-accept">{ac}</span>
-      <span className="badge-sep">/</span>
-      <span className="badge badge-reject">{re}</span>
-    </span>
-  )
+function formatRangeShort(range) {
+  const fmt = n => {
+    if (n >= 1000000) return (n / 1000000).toFixed(n % 1000000 ? 1 : 0) + 'M'
+    if (n >= 1000)    return (n / 1000).toFixed(n % 1000 ? 1 : 0) + 'K'
+    return n.toString()
+  }
+  if (range.max === Infinity) return '500K+'
+  return `${fmt(range.min)}–${fmt(range.max)}`
 }
 
-function LotSizeRangeHint({ lotSize }) {
-  if (!lotSize || lotSize < 2) return null
-  const range = LOT_SIZE_RANGES.find(r => lotSize >= r.min && lotSize <= r.max)
-  if (!range) return null
-  const maxLabel = range.max === Infinity ? '500,001+' : `${range.max.toLocaleString()}`
-  return (
-    <span className="range-hint">
-      Lot range: {range.min.toLocaleString()} – {maxLabel}
-    </span>
-  )
+function formatRangeFull(range) {
+  const fmt = n => n.toLocaleString()
+  if (range.max === Infinity) return '500,001 and over'
+  return `${fmt(range.min)} – ${fmt(range.max)}`
 }
 
 export default function App() {
-  const [lotSize, setLotSize] = useState('')
-  const [inspectionLevel, setInspectionLevel] = useState('II')
-  const [inspectionType, setInspectionType] = useState('Normal')
-  const [selectedAql, setSelectedAql] = useState(1.0)
+  const [lotInput, setLotInput]         = useState('1500')
+  const [inspectionLevel, setLevel]     = useState('II')
+  const [inspectionType, setType]       = useState('Normal')
+  const [selectedAql, setAql]           = useState(1.0)
+  const [showRefTable, setShowRefTable] = useState(false)
 
-  const parsedLot = parseInt(lotSize, 10)
-  const validLot = !isNaN(parsedLot) && parsedLot >= 2
+  const trackRef   = useRef(null)
+  const dragging   = useRef(false)
+
+  const parsedLot = parseInt(lotInput, 10)
+  const validLot  = !isNaN(parsedLot) && parsedLot >= 2
+
+  const rangeIdx = useMemo(
+    () => validLot
+      ? LOT_SIZE_RANGES.findIndex(r => parsedLot >= r.min && parsedLot <= r.max)
+      : -1,
+    [parsedLot, validLot]
+  )
 
   const codeLetter = useMemo(
-    () => (validLot ? getCodeLetter(parsedLot, inspectionLevel) : null),
+    () => validLot ? getCodeLetter(parsedLot, inspectionLevel) : null,
     [parsedLot, inspectionLevel, validLot]
   )
 
-  const primaryResult = useMemo(
-    () =>
-      validLot
-        ? getSamplingPlan(parsedLot, inspectionLevel, inspectionType, selectedAql)
-        : null,
+  const result = useMemo(
+    () => validLot
+      ? getSamplingPlan(parsedLot, inspectionLevel, inspectionType, selectedAql)
+      : null,
     [parsedLot, inspectionLevel, inspectionType, selectedAql, validLot]
   )
 
   const allResults = useMemo(
-    () =>
-      validLot ? getAllAqlResults(parsedLot, inspectionLevel, inspectionType) : [],
+    () => validLot ? getAllAqlResults(parsedLot, inspectionLevel, inspectionType) : [],
     [parsedLot, inspectionLevel, inspectionType, validLot]
   )
 
-  const commonResults = allResults.filter(r => COMMON_AQL_LEVELS.includes(r.aql))
+  const cursorPct = rangeIdx >= 0
+    ? ((rangeIdx + 0.5) / RANGE_COUNT) * 100
+    : null
+
+  // ── Scale interaction ──────────────────────────────────────────────
+  const posToLotSize = useCallback((clientX) => {
+    if (!trackRef.current) return
+    const rect = trackRef.current.getBoundingClientRect()
+    const x    = clientX - rect.left
+    const pct  = Math.max(0, Math.min(0.9999, x / rect.width))
+    const idx  = Math.min(Math.floor(pct * RANGE_COUNT), RANGE_COUNT - 1)
+    return getRangeMidpoint(LOT_SIZE_RANGES[idx])
+  }, [])
+
+  const handleTrackPointerDown = useCallback((e) => {
+    dragging.current = true
+    trackRef.current.setPointerCapture(e.pointerId)
+    const v = posToLotSize(e.clientX)
+    if (v) setLotInput(v.toString())
+  }, [posToLotSize])
+
+  const handleTrackPointerMove = useCallback((e) => {
+    if (!dragging.current) return
+    const v = posToLotSize(e.clientX)
+    if (v) setLotInput(v.toString())
+  }, [posToLotSize])
+
+  const handleTrackPointerUp = useCallback(() => {
+    dragging.current = false
+  }, [])
+
+  const currentRange = rangeIdx >= 0 ? LOT_SIZE_RANGES[rangeIdx] : null
+  const pctOfLot     = result && validLot
+    ? ((result.sampleSize / parsedLot) * 100).toFixed(1)
+    : null
 
   return (
-    <div className="app">
-      <header className="header">
-        <div className="header-inner">
-          <div className="logo">
-            <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-              <rect width="32" height="32" rx="8" fill="#2563eb"/>
-              <path d="M8 24L12 8h2l3 11 3-11h2l4 16h-2.5l-2.5-10-3 10h-1l-3-10-2.5 10H8z" fill="white"/>
-            </svg>
-            <span className="logo-text">AQL Inspector</span>
+    <div className="page">
+      <div className="rule-outer">
+
+        {/* ── Header plate ─────────────────────────────────────── */}
+        <div className="rule-header">
+          <span className="rivet">◉</span>
+          <div className="header-center">
+            <span className="header-title">AQL INSPECTOR'S RULE</span>
+            <span className="header-std">ISO 2859-1 · ANSI/ASQ Z1.4 · MIL-STD-105E</span>
           </div>
-          <p className="header-sub">Sample Size Calculator · ISO 2859-1 / ANSI Z1.4</p>
+          <span className="rivet">◉</span>
         </div>
-      </header>
 
-      <main className="main">
-        {/* ── Controls ── */}
-        <section className="card controls-card">
-          <h2 className="card-title">Inspection Parameters</h2>
-          <div className="controls-grid">
+        {/* ── Rule face ────────────────────────────────────────── */}
+        <div className="rule-face">
 
-            {/* Lot Quantity */}
-            <div className="field">
-              <label className="label" htmlFor="lot-size">Lot Quantity</label>
-              <input
-                id="lot-size"
-                className={`input ${lotSize && !validLot ? 'input-error' : ''}`}
-                type="number"
-                min="2"
-                placeholder="e.g. 1500"
-                value={lotSize}
-                onChange={e => setLotSize(e.target.value)}
-              />
-              {lotSize && !validLot && (
-                <span className="field-error">Enter a whole number ≥ 2</span>
+          {/* Scale rail */}
+          <div className="scale-rail">
+            <div className="scale-row-label">LOT QUANTITY</div>
+
+            <div
+              className="scale-track"
+              ref={trackRef}
+              onPointerDown={handleTrackPointerDown}
+              onPointerMove={handleTrackPointerMove}
+              onPointerUp={handleTrackPointerUp}
+              title="Drag or click to select lot size"
+            >
+              {/* Segments */}
+              {LOT_SIZE_RANGES.map((range, i) => (
+                <div
+                  key={i}
+                  className={`scale-seg${rangeIdx === i ? ' scale-seg-active' : ''}`}
+                  style={{
+                    left:  `${(i / RANGE_COUNT) * 100}%`,
+                    width: `${100 / RANGE_COUNT}%`,
+                  }}
+                >
+                  <div className="tick" />
+                  <div className="seg-label">{formatRangeShort(range)}</div>
+                </div>
+              ))}
+
+              {/* End tick */}
+              <div className="tick tick-end" />
+
+              {/* Cursor hairline */}
+              {cursorPct !== null && (
+                <div
+                  className="cursor"
+                  style={{ left: `${cursorPct}%` }}
+                >
+                  <div className="cursor-flag">▼</div>
+                  <div className="cursor-line" />
+                </div>
               )}
-              {validLot && <LotSizeRangeHint lotSize={parsedLot} />}
-            </div>
-
-            {/* Inspection Level */}
-            <div className="field">
-              <label className="label" htmlFor="inspection-level">Inspection Level</label>
-              <select
-                id="inspection-level"
-                className="select"
-                value={inspectionLevel}
-                onChange={e => setInspectionLevel(e.target.value)}
-              >
-                <optgroup label="General">
-                  {['I','II','III'].map(l => (
-                    <option key={l} value={l}>Level {l}{l === 'II' ? ' (standard)' : ''}</option>
-                  ))}
-                </optgroup>
-                <optgroup label="Special">
-                  {['S-1','S-2','S-3','S-4'].map(l => (
-                    <option key={l} value={l}>{l}</option>
-                  ))}
-                </optgroup>
-              </select>
-            </div>
-
-            {/* Inspection Type */}
-            <div className="field">
-              <label className="label" htmlFor="inspection-type">Inspection Type</label>
-              <select
-                id="inspection-type"
-                className="select"
-                value={inspectionType}
-                onChange={e => setInspectionType(e.target.value)}
-              >
-                {INSPECTION_TYPES.map(t => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* AQL Level */}
-            <div className="field">
-              <label className="label" htmlFor="aql-level">AQL Level (%)</label>
-              <select
-                id="aql-level"
-                className="select"
-                value={selectedAql}
-                onChange={e => setSelectedAql(parseFloat(e.target.value))}
-              >
-                {COMMON_AQL_LEVELS.map(a => (
-                  <option key={a} value={a}>{formatAql(a)}%</option>
-                ))}
-              </select>
             </div>
           </div>
-        </section>
 
-        {/* ── Primary Result ── */}
-        {validLot && (
-          <section className="card result-card">
-            <h2 className="card-title">Result</h2>
-            {primaryResult ? (
-              <div className="result-grid">
-                <div className="result-stat">
-                  <span className="stat-label">Code Letter</span>
-                  <span className="stat-value stat-code">{primaryResult.codeLetter}</span>
-                  {primaryResult.codeLetter !== codeLetter && (
-                    <span className="stat-note">
-                      (adjusted from {codeLetter})
-                    </span>
-                  )}
-                </div>
-                <div className="result-stat">
-                  <span className="stat-label">Sample Size</span>
-                  <span className="stat-value stat-sample">{primaryResult.sampleSize}</span>
-                  <span className="stat-note">
-                    {((primaryResult.sampleSize / parsedLot) * 100).toFixed(1)}% of lot
-                  </span>
-                </div>
-                <div className="result-stat">
-                  <span className="stat-label">Accept ≤</span>
-                  <span className="stat-value stat-accept">{primaryResult.ac}</span>
-                  <span className="stat-note">defects</span>
-                </div>
-                <div className="result-stat">
-                  <span className="stat-label">Reject ≥</span>
-                  <span className="stat-value stat-reject">{primaryResult.re}</span>
-                  <span className="stat-note">defects</span>
-                </div>
-              </div>
-            ) : (
-              <div className="no-plan">
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                  <circle cx="10" cy="10" r="9" stroke="#f59e0b" strokeWidth="2"/>
-                  <path d="M10 6v5M10 13v1" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round"/>
-                </svg>
-                No applicable sampling plan for this combination. Try a different AQL level or inspection type.
-              </div>
-            )}
-          </section>
-        )}
+          {/* ── Sliding strip divider ── */}
+          <div className="strip-divider">
+            <div className="strip-edge top" />
+            <div className="strip-body">
+              <span className="strip-label">SAMPLE SIZE CODE LETTER</span>
+            </div>
+            <div className="strip-edge bottom" />
+          </div>
 
-        {/* ── AQL Summary Table ── */}
-        {validLot && commonResults.length > 0 && (
-          <section className="card table-card">
-            <h2 className="card-title">
-              All Common AQL Levels
-              <span className="card-title-sub">
-                {inspectionType} Inspection · Level {inspectionLevel} · Lot: {parsedLot.toLocaleString()}
+          {/* ── Result windows ── */}
+          <div className="windows-row">
+            <Window label="CODE" note={result && result.codeLetter !== codeLetter ? `adj. from ${codeLetter}` : null}>
+              <span className="val-code">{result?.codeLetter ?? codeLetter ?? '—'}</span>
+            </Window>
+
+            <div className="window-sep" />
+
+            <Window label="SAMPLE SIZE" note={pctOfLot ? `${pctOfLot}% of lot` : null}>
+              <span className="val-sample">{result?.sampleSize ?? '—'}</span>
+            </Window>
+
+            <div className="window-sep" />
+
+            <Window label="ACCEPT  ≤" note="defects">
+              <span className="val-accept">{result ? result.ac : '—'}</span>
+            </Window>
+
+            <div className="window-sep" />
+
+            <Window label="REJECT  ≥" note="defects">
+              <span className="val-reject">{result ? result.re : '—'}</span>
+            </Window>
+          </div>
+
+        </div>{/* /rule-face */}
+
+        {/* ── Settings rail ────────────────────────────────────── */}
+        <div className="settings-rail">
+          <SettingGroup label="INSP. LEVEL">
+            {INSP_LEVELS.map(l => (
+              <SegBtn key={l} active={inspectionLevel === l} onClick={() => setLevel(l)}>{l}</SegBtn>
+            ))}
+          </SettingGroup>
+
+          <div className="settings-vsep" />
+
+          <SettingGroup label="TYPE">
+            {INSP_TYPES.map(t => (
+              <SegBtn key={t} active={inspectionType === t} onClick={() => setType(t)}>{t}</SegBtn>
+            ))}
+          </SettingGroup>
+
+          <div className="settings-vsep" />
+
+          <SettingGroup label="AQL  %">
+            {COMMON_AQL.map(a => (
+              <SegBtn key={a} active={selectedAql === a} onClick={() => setAql(a)}>{a}</SegBtn>
+            ))}
+          </SettingGroup>
+        </div>
+
+        {/* ── Input / lot entry rail ────────────────────────────── */}
+        <div className="input-rail">
+          <span className="rivet small">◉</span>
+
+          <div className="input-group">
+            <label className="input-lbl" htmlFor="lot-qty">LOT QTY</label>
+            <input
+              id="lot-qty"
+              className={`lot-input${lotInput && !validLot ? ' lot-input-err' : ''}`}
+              type="number"
+              min="2"
+              placeholder="e.g. 1500"
+              value={lotInput}
+              onChange={e => setLotInput(e.target.value)}
+            />
+            {currentRange && (
+              <span className="range-display">
+                range&nbsp;&nbsp;{formatRangeFull(currentRange)}
               </span>
-            </h2>
-            <div className="table-wrap">
-              <table className="aql-table">
+            )}
+            {lotInput && !validLot && (
+              <span className="input-err-msg">Enter a whole number ≥ 2</span>
+            )}
+          </div>
+
+          <button
+            className="ref-toggle"
+            onClick={() => setShowRefTable(t => !t)}
+            title="Toggle full AQL reference table"
+          >
+            {showRefTable ? '▲ HIDE TABLE' : '▼ FULL TABLE'}
+          </button>
+
+          <span className="rivet small">◉</span>
+        </div>
+
+        {/* ── Reference table (collapsible) ─────────────────────── */}
+        {showRefTable && validLot && (
+          <div className="ref-table-wrap">
+            <div className="ref-table-header">
+              ALL AQL LEVELS — {inspectionType.toUpperCase()} INSPECTION · LEVEL {inspectionLevel} · LOT {parsedLot.toLocaleString()}
+            </div>
+            <div className="ref-table-scroll">
+              <table className="ref-table">
                 <thead>
                   <tr>
-                    <th>AQL (%)</th>
+                    <th>AQL %</th>
                     <th>Code</th>
-                    <th>Sample Size</th>
-                    <th>% of Lot</th>
-                    <th>Accept / Reject</th>
+                    <th>n</th>
+                    <th>% Lot</th>
+                    <th>Ac</th>
+                    <th>Re</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {commonResults.map(({ aql, result }) => {
-                    const isSelected = aql === selectedAql
-                    return (
-                      <tr
-                        key={aql}
-                        className={isSelected ? 'row-selected' : ''}
-                        onClick={() => setSelectedAql(aql)}
-                        style={{ cursor: 'pointer' }}
-                      >
-                        <td className="td-aql">{formatAql(aql)}%</td>
-                        <td className="td-code">{result ? result.codeLetter : '—'}</td>
-                        <td className="td-size">{result ? result.sampleSize : '—'}</td>
-                        <td className="td-pct">
-                          {result
-                            ? `${((result.sampleSize / parsedLot) * 100).toFixed(1)}%`
-                            : '—'}
-                        </td>
-                        <td className="td-acre">
-                          {result ? <AqlBadge ac={result.ac} re={result.re} /> : <span className="badge badge-na">N/A</span>}
-                        </td>
-                      </tr>
-                    )
-                  })}
+                  {allResults
+                    .filter(r => COMMON_AQL.includes(r.aql))
+                    .map(({ aql, result: r }) => (
+                    <tr
+                      key={aql}
+                      className={selectedAql === aql ? 'ref-row-active' : ''}
+                      onClick={() => setAql(aql)}
+                    >
+                      <td className="rt-aql">{aql}%</td>
+                      <td className="rt-code">{r?.codeLetter ?? '—'}</td>
+                      <td className="rt-n">{r?.sampleSize ?? '—'}</td>
+                      <td className="rt-pct">
+                        {r && validLot ? `${((r.sampleSize / parsedLot) * 100).toFixed(1)}%` : '—'}
+                      </td>
+                      <td className="rt-ac">{r ? r.ac : '—'}</td>
+                      <td className="rt-re">{r ? r.re : '—'}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
-            <p className="table-hint">Click any row to select that AQL level above.</p>
-          </section>
+          </div>
         )}
 
-        {/* ── How It Works ── */}
-        <section className="card info-card">
-          <h2 className="card-title">How It Works</h2>
-          <div className="info-grid">
-            <div className="info-step">
-              <span className="step-num">1</span>
-              <div>
-                <strong>Lot Size → Code Letter</strong>
-                <p>The lot quantity is looked up in the ISO 2859-1 sample size code letter table using the chosen inspection level (General I/II/III or Special S-1–S-4).</p>
-              </div>
-            </div>
-            <div className="info-step">
-              <span className="step-num">2</span>
-              <div>
-                <strong>Code Letter → Sample Size</strong>
-                <p>Each code letter maps to a fixed sample size (e.g., J → 80 units). If the table shows an arrow, the next applicable plan is used automatically.</p>
-              </div>
-            </div>
-            <div className="info-step">
-              <span className="step-num">3</span>
-              <div>
-                <strong>AQL + Inspection Type → Accept/Reject</strong>
-                <p>The AQL level and inspection type (Normal / Tightened / Reduced) determine the acceptance number (Ac) and rejection number (Re) for the lot.</p>
-              </div>
-            </div>
-            <div className="info-step">
-              <span className="step-num">4</span>
-              <div>
-                <strong>Decision</strong>
-                <p>Inspect the required sample. If defects found ≤ Ac → <span className="text-accept">Accept</span> the lot. If defects found ≥ Re → <span className="text-reject">Reject</span> the lot.</p>
-              </div>
-            </div>
-          </div>
-        </section>
-      </main>
+        {/* ── Footer plate ─────────────────────────────────────── */}
+        <div className="rule-footer">
+          <span className="rivet">◉</span>
+          <span className="footer-text">
+            SINGLE SAMPLING PLAN · NORMAL / TIGHTENED / REDUCED
+          </span>
+          <span className="rivet">◉</span>
+        </div>
 
-      <footer className="footer">
-        <p>Based on ISO 2859-1 · ANSI/ASQ Z1.4 · MIL-STD-105E</p>
-      </footer>
+      </div>
     </div>
+  )
+}
+
+// ── Sub-components ──────────────────────────────────────────────────
+
+function Window({ label, note, children }) {
+  return (
+    <div className="window">
+      <div className="window-label">{label}</div>
+      <div className="window-val">{children}</div>
+      {note && <div className="window-note">{note}</div>}
+    </div>
+  )
+}
+
+function SettingGroup({ label, children }) {
+  return (
+    <div className="setting-group">
+      <span className="setting-lbl">{label}</span>
+      <div className="seg-btns">{children}</div>
+    </div>
+  )
+}
+
+function SegBtn({ active, onClick, children }) {
+  return (
+    <button
+      className={`seg-btn${active ? ' seg-btn-active' : ''}`}
+      onClick={onClick}
+    >
+      {children}
+    </button>
   )
 }

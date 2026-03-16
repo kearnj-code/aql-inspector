@@ -52,15 +52,20 @@ html, body { height: 100%; }
 
 body {
   font-family: 'Courier New', Courier, monospace;
-  background: radial-gradient(ellipse at center, #2a1e10 0%, #110900 100%);
   min-height: 100vh;
+}
+
+/* AQL slide rule wrapper — centres the rule on its own background */
+.page {
+  background: radial-gradient(ellipse at center, #2a1e10 0%, #110900 100%);
+  min-height: calc(100vh - 44px); /* subtract nav height */
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 2rem 1rem;
 }
 
-.page {
+.page > .rule-outer {
   width: 100%;
   max-width: 920px;
 }
